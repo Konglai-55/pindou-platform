@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f8f8f3">
+  <meta name="description" content="豆格工坊，在线生成、编辑、分享拼豆图纸。">
+  <title>豆格工坊 · 拼豆图纸工作台</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css?v=20261119-04">
+  <script src="/vendor/jsqr.js" defer></script>
+  <script type="module" src="/app.js?v=20261119-04"></script>
+</head>
+<body>
+  <a class="skip" href="#main">跳到主要内容</a>
+  <header id="header"></header>
+  <main id="main" tabindex="-1"></main>
+  <footer id="footer"></footer>
+  <input id="image-input" type="file" accept="image/*" hidden>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
