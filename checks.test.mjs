@@ -73,7 +73,7 @@ test('远程目录不可用时，图纸列表和详情使用已有缓存', {time
   const source='http://127.0.0.1:'+storage.address().port+'/patterns.json';
   const directory=await mkdtemp(join(tmpdir(),'bead-library-'));
   const preview='https://pindou.cn-nb1.rains3.com/pixel-cafe/preview.webp';
-  await writeFile(join(directory,'remote-library.json'),JSON.stringify({source,manifest:{data:[{name:{zh:'缓存图纸'},chart:{previewSrc:preview}}]}}));
+  await writeFile(join(directory,'remote-library.json'),JSON.stringify({source,manifest:{data:[{name:{zh:'缓存图纸'},chart:{previewSrc:'/api/media/pixel-cafe/preview.webp'}}]}}));
   const url=await start(t,{DB_FILE:join(directory,'studio.sqlite'),REMOTE_LIBRARY_MANIFEST_URL:source});
   t.after(()=>rm(directory,{recursive:true,force:true}));
   const guest=client(url);

@@ -4,9 +4,11 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 const categories=new Set(['人物','动漫','动物','美食','花卉','节日','文字','风景','其他']);
 export const remoteImageOrigin='https://pindou.cn-nb1.rains3.com';
 export function remoteImageUrl(value){
+  if(typeof value!=='string')return;
   try {
-    const url=new URL(value);
-    if(url.origin===remoteImageOrigin&&!url.username&&!url.password&&url.pathname.startsWith('/pixel-cafe/'))return url.href;
+    const path=value.startsWith('/api/media/pixel-cafe/')?value.slice('/api/media'.length):value;
+    const url=new URL(path,remoteImageOrigin);
+    if(url.origin===remoteImageOrigin&&!url.username&&!url.password&&['/pixel-cafe/','/patterns/'].some(prefix=>url.pathname.startsWith(prefix)))return url.href;
   } catch {}
 }
 
