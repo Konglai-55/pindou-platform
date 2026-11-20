@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { createPattern, flood, clearBorder, reduceColors, tally, paletteSubset } from './public/engine.js';
 
@@ -61,6 +64,27 @@ function client(base){
 }
 const password='test-only-password';
 const register=(call,name,extras={})=>call('/register','POST',{account:name,name,password,...extras});
+
+test('远程目录不可用时，图纸列表和详情使用已有缓存', {timeout:10000}, async t=>{
+  const storage=createServer((req,res)=>res.writeHead(503).end());
+  storage.listen(0,'127.0.0.1');
+  await once(storage,'listening');
+  t.after(()=>storage.close());
+  const source='http://127.0.0.1:'+storage.address().port+'/patterns.json';
+  const directory=await mkdtemp(join(tmpdir(),'bead-library-'));
+  const preview='https://pindou.cn-nb1.rains3.com/pixel-cafe/preview.webp';
+  await writeFile(join(directory,'remote-library.json'),JSON.stringify({source,manifest:{data:[{name:{zh:'缓存图纸'},chart:{previewSrc:preview}}]}}));
+  const url=await start(t,{DB_FILE:join(directory,'studio.sqlite'),REMOTE_LIBRARY_MANIFEST_URL:source});
+  t.after(()=>rm(directory,{recursive:true,force:true}));
+  const guest=client(url);
+  const {items,remoteCount}=await guest('/library');
+  assert.equal(remoteCount,1);
+  const {project}=await guest('/remote-library/'+items[0].id);
+  assert.equal(project.preview,preview);
+  const oldPreview=await fetch(url+'/api/remote-image?url='+encodeURIComponent(preview),{redirect:'manual'});
+  assert.equal(oldPreview.headers.get('location'),preview);
+});
+
 test('账号、付费图纸、材料库存、管理员发卡和卡密激活', {timeout:20000}, async t=>{
   const url=await start(t);
   const author=client(url), reader=client(url), admin=client(url), guest=client(url);

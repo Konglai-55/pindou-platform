@@ -6,12 +6,13 @@ import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'no
 import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { categories } from './public/categories.js';
-import { getRemoteLibrary } from './remote-library.mjs';
+import { createRemoteLibrary, remoteImageOrigin, remoteImageUrl } from './remote-library.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const publicDir = resolve(root, 'public');
 const dbFile = process.env.DB_FILE || resolve(root, 'data/studio.sqlite');
 if (dbFile !== ':memory:') await mkdir(dirname(resolve(dbFile)), {recursive:true});
+const getRemoteLibrary=createRemoteLibrary(dbFile===':memory:'?null:resolve(dirname(resolve(dbFile)),'remote-library.json'));
 const db = new DatabaseSync(dbFile);
 db.exec("" +
   "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;" +
@@ -210,22 +211,17 @@ async function api(req,res,url,user,token,secure) {
   const body=()=>jsonBody(req);
   if(method==='GET'&&path==='/api/session') return {user:userInfo(user),requireMembership,shop:configuredUrl(process.env.CARD_SHOP_URL),community:configuredUrl(process.env.COMMUNITY_URL),support:string(process.env.SUPPORT_EMAIL,160)};
   if(method==='GET'&&path==='/api/remote-image'){
-    const source=string(query.get('url'),800);
-    const parsed=new URL(source);
-    if(parsed.protocol!=='https:'||parsed.hostname!=='pindou.cn-nb1.rains3.com'||!parsed.pathname.startsWith('/pixel-cafe/'))reject(400,'远程图片地址无效');
-    const upstream=await fetch(parsed,{signal:AbortSignal.timeout(15000)});
-    if(!upstream.ok)reject(404,'远程图片不存在');
-    const bytes=Buffer.from(await upstream.arrayBuffer());
-    res.writeHead(200,{'Content-Type':upstream.headers.get('content-type')||'image/webp','Content-Length':bytes.length,'Cache-Control':'public, max-age=3600'});
-    res.end(bytes);
+    const source=remoteImageUrl(query.get('url'));
+    if(!source)reject(400,'远程图片地址无效');
+    res.writeHead(307,{'Location':source,'Cache-Control':'public, max-age=300'});
+    res.end();
     return;
   }
   if(method==='GET'&&path.startsWith('/api/remote-library/')){
     const id=decodeURIComponent(path.slice('/api/remote-library/'.length));
     const remote=(await getRemoteLibrary()).find(item=>item.id===id);
     if(!remote)reject(404,'找不到远程图纸');
-    const proxy=url=>'/api/remote-image?url='+encodeURIComponent(url);
-    return {project:{...remote,preview:proxy(remote.preview),url:proxy(remote.url),public:false,reacts:[]},pattern:null};
+    return {project:{...remote,public:false,reacts:[]},pattern:null};
   }
   if(method==='POST'&&path==='/api/register'){
     rate(req,'auth',24,900000);
@@ -301,10 +297,7 @@ async function api(req,res,url,user,token,secure) {
       return true;
     });
     const localItems=rows.slice(0,12).map(row=>projectInfo(row,user));
-    const remotePage=remoteItems.slice(page*12,page*12+12).map(item=>({...item,
-      preview:'/api/remote-image?url='+encodeURIComponent(item.preview),
-      url:'/api/remote-image?url='+encodeURIComponent(item.url)
-    }));
+    const remotePage=remoteItems.slice(page*12,page*12+12);
     return {items:[...localItems,...remotePage],more:rows.length>12||remoteItems.length>page*12+12,remoteCount:remoteItems.length};
   }
   if(path==='/api/projects'){
@@ -461,7 +454,7 @@ const server=createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Referrer-Policy','same-origin');
     res.setHeader('X-Frame-Options','DENY');
-    res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    res.setHeader('Content-Security-Policy',`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${remoteImageOrigin}; connect-src 'self' ${remoteImageOrigin}; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`);
     const url=new URL(req.url,'http://localhost');
     const path=url.pathname;
     if(path.startsWith('/api/')){

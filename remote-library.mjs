@@ -1,10 +1,14 @@
 import { createHash } from 'node:crypto';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 
 const categories=new Set(['人物','动漫','动物','美食','花卉','节日','文字','风景','其他']);
-const cache={at:0,items:[],error:''};
-let reportedError='';
-
-const manifestUrl=()=>process.env.REMOTE_LIBRARY_MANIFEST_URL?.trim();
+export const remoteImageOrigin='https://pindou.cn-nb1.rains3.com';
+export function remoteImageUrl(value){
+  try {
+    const url=new URL(value);
+    if(url.origin===remoteImageOrigin&&!url.username&&!url.password&&url.pathname.startsWith('/pixel-cafe/'))return url.href;
+  } catch {}
+}
 
 function titleFromKey(key){
   const name=key.split('/').filter(Boolean).pop()||key;
@@ -21,8 +25,8 @@ function categoryFromManifest(value,name){
 }
 function itemFor(entry){
   const key=entry.storage?.previewKey||entry.chart?.previewSrc||entry.id||'';
-  const preview=entry.chart?.previewSrc;
-  const chart=entry.chart?.src||preview;
+  const preview=remoteImageUrl(entry.chart?.previewSrc);
+  const chart=remoteImageUrl(entry.chart?.src)||preview;
   if(!key||!preview)return null;
   const id='remote-'+createHash('sha1').update(key).digest('hex').slice(0,20);
   const palette=entry.palette&&typeof entry.palette==='object'?Object.keys(entry.palette).length:0;
@@ -34,23 +38,45 @@ function itemFor(entry){
   };
 }
 
-export function remoteLibraryConfigured(){
-  return Boolean(manifestUrl());
+function readItems(manifest){
+  if(!Array.isArray(manifest?.data))throw Error('远程图纸目录格式无效');
+  return manifest.data.map(itemFor).filter(Boolean);
 }
 
-export async function getRemoteLibrary({force=false}={}){
-  if(!remoteLibraryConfigured())return [];
-  if(!force&&cache.at&&Date.now()-cache.at<5*60*1000)return cache.items;
-  try {
-    const response=await fetch(manifestUrl(),{headers:{accept:'application/json'},signal:AbortSignal.timeout(12000)});
-    if(!response.ok)throw Error('远程图纸目录返回 HTTP '+response.status);
-    const manifest=await response.json();
-    const items=Array.isArray(manifest.data)?manifest.data.map(itemFor).filter(Boolean):[];
-    cache.at=Date.now();cache.items=items;cache.error='';
-    return items;
-  } catch(error) {
-    cache.at=Date.now();cache.items=[];cache.error=error.message;
-    if(reportedError!==error.message){reportedError=error.message;console.warn('远程图纸库暂时不可用:',error.message);}
-    return [];
+export function createRemoteLibrary(cacheFile){
+  const source=process.env.REMOTE_LIBRARY_MANIFEST_URL?.trim();
+  let items, pending, nextRefresh=0, reportedError='';
+  const saved=source&&cacheFile?readFile(cacheFile,'utf8').then(text=>{
+    const snapshot=JSON.parse(text);
+    if(snapshot.source===source)items=readItems(snapshot.manifest);
+  }).catch(error=>{
+    if(error.code!=='ENOENT')console.warn('无法读取图纸目录缓存:',error.message);
+  }):undefined;
+
+  async function refresh(){
+    try {
+      const response=await fetch(source,{headers:{accept:'application/json'},signal:AbortSignal.timeout(60000)});
+      if(!response.ok)throw Error('远程图纸目录返回 HTTP '+response.status);
+      const manifest=await response.json();
+      items=readItems(manifest);
+      reportedError='';
+      nextRefresh=Date.now()+5*60*1000;
+      if(cacheFile){
+        const temporary=cacheFile+'.'+process.pid+'.tmp';
+        await writeFile(temporary,JSON.stringify({source,manifest}));
+        await rename(temporary,cacheFile);
+      }
+    } catch(error) {
+      nextRefresh=Date.now()+30000;
+      if(reportedError!==error.message){reportedError=error.message;console.warn('远程图纸目录刷新失败:',error.message);}
+    }
   }
+
+  return async function getRemoteLibrary(){
+    if(!source)return [];
+    await saved;
+    if(!pending&&Date.now()>=nextRefresh)pending=refresh().finally(()=>{pending=undefined;});
+    if(!items)await pending;
+    return items||[];
+  };
 }
